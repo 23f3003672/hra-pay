@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hrapay"
+version = "0.1.0"
+description = "Hierarchical RL for payment retry optimisation with LLM-calibrated reward shaping"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.6",
+    "gymnasium>=0.29",
+    "torch>=2.2",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dashboard = ["streamlit>=1.32", "plotly>=5.20"]
+llm = ["google-genai>=0.3"]
+razorpay = ["razorpay>=1.4"]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ARG", "SLF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["SLF", "ARG"]

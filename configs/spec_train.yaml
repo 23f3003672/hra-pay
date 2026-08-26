@@ -1,0 +1,262 @@
+# =============================================================================
+# HRA-Pay ground-truth environment specification  (TRAINING distribution)
+# =============================================================================
+# This file is the *generative model of the world*. The agent never sees it.
+# It is versioned and committed deliberately: a reviewer must be able to read
+# exactly what assumptions the synthetic environment encodes, and check whether
+# the agent's advantage is earned or baked in.
+#
+# Every number below is an assumption, not a measurement. See README "Limitations".
+# Patterns are grounded in publicly documented issuer behaviour:
+#   - insufficient-funds declines recover substantially after a delay, more so
+#     near salary-credit dates
+#   - do-not-honor is a generic issuer refusal; immediate same-instrument retry
+#     rarely works, an alternate rail sometimes does
+#   - issuer-unavailable is transient infrastructure failure and clears quickly
+#   - suspected-fraud and account-closed are terminal; retrying is pure cost
+# =============================================================================
+
+version: "spec_train/v1"
+description: "Training distribution. Baseline issuer behaviour, payday on 1st-3rd and 28th-31st."
+
+channels: [UPI, CREDIT_CARD, DEBIT_CARD, NETBANKING, WALLET]
+
+time_buckets: [NOW, PLUS_2H, PLUS_6H, PLUS_24H, PLUS_72H]
+
+# Hours of elapsed time each timing action corresponds to.
+time_bucket_hours:
+  NOW: 0
+  PLUS_2H: 2
+  PLUS_6H: 6
+  PLUS_24H: 24
+  PLUS_72H: 72
+
+# ---------------------------------------------------------------------------
+# Decline codes
+# ---------------------------------------------------------------------------
+#   weight              relative frequency in the generated population
+#   terminal_prob       P(this episode is fundamentally unrecoverable | code).
+#                       This is a LATENT variable: the agent cannot observe it.
+#                       It is what makes ABANDON a real decision rather than a
+#                       trivially dominated action.
+#   base_success        P(retry succeeds) per channel, before time/payday/fatigue
+#                       multipliers. Key "SAME" = retrying the original channel.
+#   time_multiplier     multiplier applied per timing bucket
+#   payday_sensitive    whether the payday multiplier applies
+#   raw_reason_text     the unstructured gateway string. This — and ONLY this —
+#                       is what the Day-3 LLM calibrator reads. The numbers on
+#                       this page are never shown to the LLM.
+# ---------------------------------------------------------------------------
+
+decline_codes:
+
+  insufficient_funds:
+    weight: 0.26
+    terminal_prob: 0.10
+    payday_sensitive: true
+    raw_reason_text: >-
+      Transaction declined by issuing bank: available balance is lower than the
+      transaction amount. Customer account is active and in good standing.
+    base_success:
+      SAME: 0.30
+      UPI: 0.34
+      CREDIT_CARD: 0.38
+      DEBIT_CARD: 0.28
+      NETBANKING: 0.26
+      WALLET: 0.20
+    time_multiplier:
+      NOW: 0.35
+      PLUS_2H: 0.55
+      PLUS_6H: 0.80
+      PLUS_24H: 1.25
+      PLUS_72H: 1.45
+
+  do_not_honor:
+    weight: 0.21
+    terminal_prob: 0.30
+    payday_sensitive: false
+    raw_reason_text: >-
+      Issuer declined the transaction without providing a specific reason
+      (do not honour). No further detail supplied by the card network.
+    base_success:
+      SAME: 0.13
+      UPI: 0.31
+      CREDIT_CARD: 0.20
+      DEBIT_CARD: 0.19
+      NETBANKING: 0.28
+      WALLET: 0.22
+    time_multiplier:
+      NOW: 0.50
+      PLUS_2H: 0.75
+      PLUS_6H: 0.95
+      PLUS_24H: 1.10
+      PLUS_72H: 1.10
+
+  issuer_unavailable:
+    weight: 0.14
+    terminal_prob: 0.03
+    payday_sensitive: false
+    raw_reason_text: >-
+      Could not reach the issuing bank's authorisation host. The request timed
+      out at the network layer. This is a temporary infrastructure condition.
+    base_success:
+      SAME: 0.55
+      UPI: 0.60
+      CREDIT_CARD: 0.55
+      DEBIT_CARD: 0.52
+      NETBANKING: 0.45
+      WALLET: 0.58
+    time_multiplier:
+      NOW: 0.45
+      PLUS_2H: 1.35
+      PLUS_6H: 1.40
+      PLUS_24H: 1.25
+      PLUS_72H: 1.10
+
+  authentication_failed:
+    weight: 0.13
+    terminal_prob: 0.12
+    payday_sensitive: false
+    raw_reason_text: >-
+      Customer failed additional factor authentication. The OTP was not entered
+      or was entered incorrectly before the 3-D Secure session expired.
+    base_success:
+      SAME: 0.34
+      UPI: 0.52
+      CREDIT_CARD: 0.32
+      DEBIT_CARD: 0.30
+      NETBANKING: 0.38
+      WALLET: 0.46
+    time_multiplier:
+      NOW: 0.90
+      PLUS_2H: 1.05
+      PLUS_6H: 1.00
+      PLUS_24H: 0.85
+      PLUS_72H: 0.65
+
+  transaction_limit_exceeded:
+    weight: 0.09
+    terminal_prob: 0.08
+    payday_sensitive: false
+    raw_reason_text: >-
+      The transaction exceeds a limit configured on the customer's account,
+      such as a per-transaction ceiling or a cumulative daily spend cap.
+    base_success:
+      SAME: 0.22
+      UPI: 0.30
+      CREDIT_CARD: 0.40
+      DEBIT_CARD: 0.20
+      NETBANKING: 0.42
+      WALLET: 0.15
+    time_multiplier:
+      NOW: 0.20
+      PLUS_2H: 0.30
+      PLUS_6H: 0.50
+      PLUS_24H: 1.40
+      PLUS_72H: 1.45
+
+  expired_card:
+    weight: 0.07
+    terminal_prob: 0.35
+    payday_sensitive: false
+    raw_reason_text: >-
+      The card's validity period has ended. The stored expiry date is in the
+      past and the instrument can no longer be authorised.
+    base_success:
+      SAME: 0.01
+      UPI: 0.48
+      CREDIT_CARD: 0.05
+      DEBIT_CARD: 0.05
+      NETBANKING: 0.45
+      WALLET: 0.35
+    time_multiplier:
+      NOW: 1.00
+      PLUS_2H: 1.00
+      PLUS_6H: 1.00
+      PLUS_24H: 1.00
+      PLUS_72H: 1.00
+
+  suspected_fraud:
+    weight: 0.06
+    terminal_prob: 0.92
+    payday_sensitive: false
+    raw_reason_text: >-
+      The issuer's risk engine flagged this authorisation as potentially
+      fraudulent and blocked it. The account may be under a security review.
+    base_success:
+      SAME: 0.01
+      UPI: 0.02
+      CREDIT_CARD: 0.01
+      DEBIT_CARD: 0.01
+      NETBANKING: 0.02
+      WALLET: 0.01
+    time_multiplier:
+      NOW: 1.00
+      PLUS_2H: 1.00
+      PLUS_6H: 1.00
+      PLUS_24H: 1.00
+      PLUS_72H: 1.00
+
+  account_closed:
+    weight: 0.04
+    terminal_prob: 1.00
+    payday_sensitive: false
+    raw_reason_text: >-
+      The account associated with this payment instrument has been closed by
+      the customer or the bank. No further authorisations will be accepted.
+    base_success:
+      SAME: 0.00
+      UPI: 0.00
+      CREDIT_CARD: 0.00
+      DEBIT_CARD: 0.00
+      NETBANKING: 0.00
+      WALLET: 0.00
+    time_multiplier:
+      NOW: 1.00
+      PLUS_2H: 1.00
+      PLUS_6H: 1.00
+      PLUS_24H: 1.00
+      PLUS_72H: 1.00
+
+# ---------------------------------------------------------------------------
+# Population-level modifiers
+# ---------------------------------------------------------------------------
+
+# Applied to payday_sensitive codes when the retry lands on a payday window.
+payday:
+  multiplier: 1.55
+  days_of_month: [1, 2, 3, 28, 29, 30, 31]
+
+# Retry fatigue: each successive attempt on the SAME channel is less likely to
+# work (issuer velocity checks start throttling). Indexed by attempts already
+# made on that channel; the last value is used beyond the list.
+channel_fatigue: [1.00, 0.82, 0.62, 0.45, 0.30]
+
+# Merchant risk tier affects issuer willingness to authorise.
+merchant_tiers:
+  LOW:    {weight: 0.50, success_multiplier: 1.10}
+  MEDIUM: {weight: 0.35, success_multiplier: 1.00}
+  HIGH:   {weight: 0.15, success_multiplier: 0.78}
+
+# Transaction amounts, log-normal in rupees.
+amount:
+  distribution: lognormal
+  mean_log: 7.1          # ~ Rs 1,200 median
+  sigma_log: 0.95
+  min: 99.0
+  max: 250000.0
+
+# Originating channel mix for the first failed attempt.
+origin_channel_weights:
+  UPI: 0.38
+  CREDIT_CARD: 0.24
+  DEBIT_CARD: 0.21
+  NETBANKING: 0.11
+  WALLET: 0.06
+
+# Hard ceiling on probability so nothing is ever a sure thing.
+success_probability_cap: 0.92
+
+# Episode limits enforced by the environment itself (separate from PolicyGuard).
+max_attempts_per_episode: 6
+episode_horizon_hours: 336     # 14 days
