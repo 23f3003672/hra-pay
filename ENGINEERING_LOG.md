@@ -75,3 +75,113 @@ learning signal is scale-free but the headline number stays in money.
 - `make env-demo` rolls out episodes under a random policy: 1/4 recovered, total
   reward -728. Random doing badly is the expected result and the first sanity check
   that the reward function is not accidentally generous.
+
+---
+
+## Day 2 — 27 Aug — reward, guardrails, audit trail, baselines
+
+**Goal:** a complete decision pipeline and the first real recovered-revenue numbers.
+
+### The guard silently crippled the baseline, and I nearly reported it as a result
+
+First end-to-end run produced this:
+
+```
+static_schedule       recovery_rate 0.157   mean_time_to_recovery 24.00
+static_with_switch    recovery_rate 0.565   mean_time_to_recovery 49.87
+```
+
+A mean time-to-recovery of *exactly* 24.00 hours is not a statistic, it is a
+symptom. It meant `static_schedule` only ever recovered on its first retry,
+despite having a three-attempt schedule.
+
+Cause: the environment seeds `_attempts_by_channel[origin_channel] = 1` to
+represent the original failed authorisation, which is correct — the issuer has
+seen that attempt and retry fatigue must reflect it. But `PolicyGuard` was
+budgeting against the same counter, with `max_attempts_per_channel = 2`. So the
+original failure consumed half of every channel's retry budget before the agent
+had done anything at all. The naive baseline, which never switches channel, got
+exactly one retry and then hit the cap.
+
+**Fix:** two separate counters with explicitly different jobs.
+`_attempts_by_channel` includes the original failure and drives retry fatigue.
+`_retries_by_channel` counts only agent-initiated retries and is what the guard
+budgets against.
+
+```
+static_schedule       recovery_rate 0.346   mean_time_to_recovery 63.51
+```
+
+The honest reading: I had accidentally handicapped the baseline my agent is
+supposed to beat, in the direction that flatters my agent, and the only reason I
+caught it was a suspiciously round number in a column I nearly skipped. Every
+comparison in this repo now runs through one shared `EpisodeRunner` for exactly
+this reason — a baseline on its own code path is not a baseline.
+
+### Reward: scale-free, but not amount-blind
+
+Day 1 left rewards denominated in rupees, which would have made the TD error a
+function of transaction size rather than decision quality. Reward is now
+expressed as a fraction of transaction value, so a full recovery is worth 1.0
+whether the payment is Rs 99 or Rs 99,000.
+
+The subtlety worth stating: this does *not* make transaction amount irrelevant,
+because the retry cost has a fixed component. A Rs 3 gateway fee is 3% of a
+Rs 100 payment and 0.003% of a Rs 100,000 one, so the cost/benefit of retrying
+genuinely does depend on size. That is real payment economics, and it is why
+`amount_norm` stays a meaningful input feature rather than dead weight.
+Pinned by `test_fixed_fee_makes_small_transactions_relatively_more_expensive`.
+
+I also got that test's assertion wrong on the first pass — I asserted a >10x
+cost ratio between small and large transactions, but the variable rate applies
+at every size and floors the ratio at about 8.4x. The code was right and the
+test was wrong, which is worth recording because it is the failure mode that
+usually goes the other way.
+
+### PolicyGuard: why the rules are classed, not just listed
+
+The guard separates COMPLIANCE rules from FUTILITY ones, and the distinction is
+not cosmetic. Retrying an authorisation the issuer flagged as fraud is not a
+matter of expected value — it must not happen even if the policy is confident
+it would pay off, so it cannot be left to the policy. Futility rules are
+ordinary economics that a well-trained agent could in principle learn; they are
+enforced anyway so that a half-trained or drifted policy still cannot burn money.
+
+`test_fraud_retry_is_always_blocked` sweeps every macro action, timing and
+attempt count and asserts the result is always ABANDON. That test is the
+submission's safety claim written down. If it fails, the claim is not true.
+
+Velocity is deliberately an escalation rather than a veto — it pushes an
+over-eager retry out to a minimum gap instead of killing it, because a good
+retry proposed too early should be delayed, not discarded.
+
+### Audit trail records what was blocked, not just what happened
+
+Each record carries the *proposed* action alongside the *final* one. An audit
+log that only records what the system did cannot answer the question a reviewer
+actually has — what did the model want to do, and what stopped it. `guard`
+carries the rule that fired, its class, and a human-readable reason.
+
+Two fields renamed for honesty after the fact: `q_values` became
+`policy_diagnostics`, because a static schedule has no Q-values and calling its
+rule string a Q-value would be a small lie in a file whose entire purpose is
+being trustworthy. `reward_breakdown` was being written as an empty dict; it now
+carries the per-term decomposition, because a single reward number is not
+auditable.
+
+### End of day
+
+47 tests passing. First real numbers, 1,000 episodes x 3 seeds:
+
+```
+policy               recovered_inr   recovery_rate   wasted_attempts   issuer_risk   ttr_h
+static_schedule         536,078          0.346            1,426             0        63.5
+static_with_switch      880,377          0.583            1,446             0        49.8
+```
+
+`issuer_risk_exposure = 0` for both is the guard doing its job across 6,000
+episodes. The channel-switching baseline is substantially stronger than the
+naive one, which is why both are reported — comparing the learned agent only
+against the weaker baseline would inflate its apparent advantage.
+
+Tomorrow: LLM reward calibration, and the flat DQN that has to beat these.

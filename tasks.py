@@ -27,6 +27,7 @@ TASKS: dict[str, list[list[str]]] = {
         [PY, "-m", "ruff", "check", "--fix", "src", "tests"],
     ],
     "env-demo": [[PY, "-m", "hrapay.env.demo", "--episodes", "5"]],
+    "eval": [[PY, "-m", "hrapay.eval.cli", "--episodes", "1000", "--seeds", "3"]],
     "priors": [[PY, "-m", "hrapay.env.demo", "--episodes", "1", "--refresh-priors"]],
 }
 

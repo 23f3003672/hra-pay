@@ -96,7 +96,7 @@ class FrictionTable(Protocol):
     def penalty_for(self, decline_code: str) -> float: ...
 
 
-class _ZeroFriction:
+class ZeroFrictionTable:
     """Day-1 stand-in. Replaced on Day 3 by the LLM-calibrated table."""
 
     def penalty_for(self, decline_code: str) -> float:  # noqa: ARG002
@@ -120,7 +120,7 @@ class RetryEnv(gym.Env[np.ndarray, np.ndarray]):
         super().__init__()
         self.spec = spec
         self.channel_priors = channel_priors or {}
-        self.friction_table: FrictionTable = friction_table or _ZeroFriction()
+        self.friction_table: FrictionTable = friction_table or ZeroFrictionTable()
         self.reward_fn: RewardFn = reward_fn or _DefaultReward()
 
         self._generator = EpisodeGenerator(spec, seed=seed)
@@ -141,6 +141,7 @@ class RetryEnv(gym.Env[np.ndarray, np.ndarray]):
         self._elapsed_hours: float = 0.0
         self._attempts_total: int = 0
         self._attempts_by_channel: dict[str, int] = {}
+        self._retries_by_channel: dict[str, int] = {}
         self._channels_tried: set[str] = set()
         self._last_gap_hours: float = 0.0
 
@@ -212,7 +213,16 @@ class RetryEnv(gym.Env[np.ndarray, np.ndarray]):
         self._elapsed_hours = 0.0
         self._last_gap_hours = 0.0
         self._attempts_total = 0
+        # Two separate counters, and the difference matters:
+        #   _attempts_by_channel  includes the ORIGINAL failed authorisation,
+        #                         because the issuer has already seen it and
+        #                         retry fatigue must reflect that.
+        #   _retries_by_channel   counts only agent-initiated retries, and is
+        #                         what the PolicyGuard budgets against. Charging
+        #                         the original failure against the retry cap
+        #                         would silently halve every policy's budget.
         self._attempts_by_channel = {self.episode.origin_channel: 1}
+        self._retries_by_channel = {}
         self._channels_tried = {self.episode.origin_channel}
 
         return self._observe(), {"episode": self.episode.to_dict()}
@@ -297,6 +307,7 @@ class RetryEnv(gym.Env[np.ndarray, np.ndarray]):
 
         self._attempts_total += 1
         self._attempts_by_channel[target] = attempts_on_target + 1
+        self._retries_by_channel[target] = self._retries_by_channel.get(target, 0) + 1
         self._channels_tried.add(target)
         self._current_channel = target
 
@@ -313,6 +324,8 @@ class RetryEnv(gym.Env[np.ndarray, np.ndarray]):
             terminated_by_abandon=False,
         )
         reward = self.reward_fn(ctx)
+        explain = getattr(self.reward_fn, "explain", None)
+        breakdown = explain(ctx) if explain else {}
 
         terminated = success
         truncated = (not success) and (
@@ -329,6 +342,7 @@ class RetryEnv(gym.Env[np.ndarray, np.ndarray]):
                 "elapsed_hours": self._elapsed_hours,
                 "attempts_total": self._attempts_total,
                 "amount": ep.amount,
+                "reward_breakdown": breakdown,
             }
         )
         return self._observe(), reward, terminated, truncated, info

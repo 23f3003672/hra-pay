@@ -10,4 +10,3 @@ venv/
 runs/
 *.ckpt
 data/channel_priors.json
-_*.tar.gz

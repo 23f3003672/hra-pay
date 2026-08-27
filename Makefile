@@ -1,4 +1,4 @@
-.PHONY: help install dev test lint fmt env-demo priors clean
+.PHONY: help install dev test lint fmt env-demo eval priors clean
 
 PY ?= python3
 
@@ -10,6 +10,7 @@ help:
 	@echo "  make lint       ruff check"
 	@echo "  make fmt        ruff format + autofix"
 	@echo "  make env-demo   roll out the environment under a random policy"
+	@echo "  make eval       evaluate all policies and write results/"
 	@echo "  make priors     recompute the empirical channel-success priors"
 
 install:
@@ -30,6 +31,9 @@ fmt:
 
 env-demo:
 	$(PY) -m hrapay.env.demo --episodes 5
+
+eval:
+	$(PY) -m hrapay.eval.cli --episodes 1000 --seeds 3
 
 priors:
 	$(PY) -m hrapay.env.demo --episodes 1 --refresh-priors

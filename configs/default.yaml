@@ -1,0 +1,76 @@
+# =============================================================================
+# HRA-Pay runtime configuration: reward shaping and hard guardrails.
+# =============================================================================
+# Separate from configs/spec_*.yaml on purpose. The spec is the world (fixed,
+# not ours to tune). This file is our system's policy about that world, and it
+# IS ours to tune — so it must be tuned in the open, in one reviewable place,
+# rather than scattered through the code as magic numbers.
+# =============================================================================
+
+reward:
+  # Reward is expressed as a FRACTION of transaction value, not rupees.
+  # A full recovery is worth 1.0 whether the transaction is Rs 99 or Rs 99,000.
+  #
+  # Why: in rupees, a single step ranges roughly -600 to +2,300 depending only
+  # on how large the transaction happened to be. The TD error would then be
+  # dominated by transaction size rather than by decision quality, and training
+  # would be unstable for a reason that has nothing to do with the problem.
+  #
+  # This does not flatten away transaction size, because the retry cost below
+  # has a FIXED component. A Rs 3 gateway fee is 3% of a Rs 100 transaction and
+  # 0.003% of a Rs 100,000 one, so the cost/benefit ratio still depends on
+  # amount — which is exactly the real-world economics, and is why amount
+  # remains a meaningful input feature.
+
+  success_value: 1.0
+
+  # Cost of one retry attempt, as a fraction of transaction value:
+  #     fixed_fee_inr / amount  +  variable_rate
+  retry_cost:
+    fixed_fee_inr: 3.0        # per-attempt gateway/network fee
+    variable_rate: 0.004      # issuer-relationship risk, proportional
+
+  # Weight on the LLM-calibrated friction penalty. The table emits a score in
+  # [0, 10]; this converts it into a per-attempt cost fraction.
+  #   0.020 means a maximum-friction code costs 20% of transaction value per
+  #   attempt, which makes retrying such a code clearly uneconomic without
+  #   making it arithmetically impossible for the agent to ever try.
+  friction_weight: 0.020
+
+  # Discourages parking a recoverable transaction indefinitely.
+  time_decay_per_day: 0.004
+
+  # The stopping rule, in reward terms.
+  abandon_bonus: 0.06         # correctly giving up on an unrecoverable txn
+  abandon_penalty: 0.30       # giving up on one that was still recoverable
+
+# -----------------------------------------------------------------------------
+# PolicyGuard: deterministic limits enforced OUTSIDE the learned policy.
+# -----------------------------------------------------------------------------
+# The agent proposes; the guard disposes. Nothing here is learned, and nothing
+# here can be overridden by the policy no matter what its Q-values say. Every
+# intervention is written to the audit log with the rule that fired.
+#
+# Two distinct classes of rule, deliberately kept separate:
+#   COMPLIANCE — must hold for regulatory/risk reasons. Not a matter of expected
+#                value. Retrying a fraud-flagged authorisation is not something
+#                a better reward estimate should ever be able to justify.
+#   FUTILITY   — known-hopeless retries. Purely about not wasting money and
+#                issuer goodwill.
+# -----------------------------------------------------------------------------
+
+guard:
+  compliance_blocked_codes:
+    - suspected_fraud
+
+  futility_blocked_codes:
+    - account_closed
+
+  max_total_attempts: 4
+  max_attempts_per_channel: 2
+
+  # Velocity control: once this many attempts have been made, an immediate
+  # retry is not permitted — the guard escalates the timing to the minimum
+  # gap below. Rapid repeated attempts are what trigger issuer throttling.
+  velocity_attempt_threshold: 2
+  velocity_min_timing: PLUS_24H
