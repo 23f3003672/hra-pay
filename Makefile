@@ -39,6 +39,7 @@ calibrate:
 
 train:
 	$(PY) -m hrapay.train --agent flat --steps 60000
+	$(PY) -m hrapay.train --agent bdq --steps 60000
 
 eval:
 	$(PY) -m hrapay.eval.cli --episodes 1000 --seeds 3

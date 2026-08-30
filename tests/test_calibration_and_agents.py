@@ -12,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
 from hrapay.agents.flat_dqn import FlatDQNPolicy, FlatQNetwork, enumerate_flat_actions
 from hrapay.env.spec import MACRO_ACTIONS, EnvSpec
@@ -209,3 +210,96 @@ def test_flat_policy_is_deterministic_at_evaluation(spec: EnvSpec) -> None:
     a = policy.act(obs, {}).action
     b = policy.act(obs, {}).action
     assert np.array_equal(a, b)
+
+
+# --- branched agent --------------------------------------------------------
+
+
+def test_bdq_output_count_is_additive_not_multiplicative(spec: EnvSpec) -> None:
+    """The architectural claim, asserted rather than described.
+
+    13 branched outputs against 31 flat ones on this problem -- and the gap
+    widens with every action dimension added.
+    """
+    from hrapay.agents.bdq import BranchingQNetwork
+
+    branch_sizes = [len(MACRO_ACTIONS), len(spec.time_buckets), len(spec.channels)]
+    net = BranchingQNetwork(36, branch_sizes, 32)
+
+    assert net.n_outputs == sum(branch_sizes) == 13
+    assert net.n_outputs < len(enumerate_flat_actions(spec))
+
+
+def test_bdq_emits_one_q_vector_per_branch(spec: EnvSpec) -> None:
+    from hrapay.agents.bdq import BranchingQNetwork
+
+    branch_sizes = [len(MACRO_ACTIONS), len(spec.time_buckets), len(spec.channels)]
+    net = BranchingQNetwork(36, branch_sizes, 32)
+    out = net(torch.zeros(4, 36))
+
+    assert len(out) == 3
+    for q, n in zip(out, branch_sizes, strict=True):
+        assert q.shape == (4, n)
+
+
+def test_bdq_policy_returns_per_branch_diagnostics(spec: EnvSpec) -> None:
+    """The readable advantage of branching: the audit log can separate the
+    decision to retry from when, and from on which rail."""
+    from hrapay.agents.bdq import BDQPolicy, BranchingQNetwork
+
+    branch_sizes = [len(MACRO_ACTIONS), len(spec.time_buckets), len(spec.channels)]
+    policy = BDQPolicy(spec, BranchingQNetwork(36, branch_sizes, 32).eval())
+    decision = policy.act(np.zeros(36, dtype=np.float32), {})
+
+    assert decision.action.shape == (3,)
+    for name, size in zip(("macro", "timing", "channel"), branch_sizes, strict=True):
+        assert decision.diagnostics[name]["chosen"]
+        assert len(decision.diagnostics[name]["all"]) == size
+
+
+def test_branch_mask_silences_branches_that_had_no_effect(spec: EnvSpec) -> None:
+    """Without this, the timing head trains on the reward from every ABANDON --
+    a gradient for a choice that changed nothing."""
+    from hrapay.agents.bdq import ABANDON_IDX, SWITCH_IDX, branch_activity_mask
+
+    retry = MACRO_ACTIONS.index("RETRY")
+    mask = branch_activity_mask(np.array([ABANDON_IDX, retry, SWITCH_IDX]))
+
+    assert mask.tolist() == [
+        [1.0, 0.0, 0.0],  # abandon: only the macro choice mattered
+        [1.0, 1.0, 0.0],  # retry: macro and timing, channel is implicit
+        [1.0, 1.0, 1.0],  # switch: all three
+    ]
+
+
+def test_both_agents_explore_the_same_distribution() -> None:
+    """The fairness property the whole flat-vs-branched comparison rests on.
+
+    Uniform over the flat agent's 31 actions gives P(ABANDON) = 3.2%; uniform
+    over three branches gives 33%. If the two agents used their own natural
+    samplers, the comparison would measure exploration, not architecture.
+    """
+    from hrapay.train import canonicalise_for_flat, sample_random_branched_action
+
+    rng = np.random.default_rng(0)
+    n = 20_000
+    branched = [sample_random_branched_action(rng, [3, 5, 5]) for _ in range(n)]
+
+    macro_share = sum(int(a[0]) == MACRO_ACTIONS.index("ABANDON") for a in branched) / n
+    flat_share = (
+        sum(canonicalise_for_flat(a)[0] == MACRO_ACTIONS.index("ABANDON") for a in branched) / n
+    )
+    assert abs(macro_share - flat_share) < 1e-9
+    assert 0.30 < flat_share < 0.36
+
+
+def test_canonicalise_drops_branches_the_env_ignores() -> None:
+    from hrapay.train import canonicalise_for_flat
+
+    abandon = MACRO_ACTIONS.index("ABANDON")
+    retry = MACRO_ACTIONS.index("RETRY")
+    switch = MACRO_ACTIONS.index("SWITCH_CHANNEL")
+
+    assert canonicalise_for_flat(np.array([abandon, 3, 4])) == (abandon, 0, 0)
+    assert canonicalise_for_flat(np.array([retry, 3, 4])) == (retry, 3, 0)
+    assert canonicalise_for_flat(np.array([switch, 3, 4])) == (switch, 3, 4)

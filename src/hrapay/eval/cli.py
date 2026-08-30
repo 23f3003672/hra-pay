@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 
 from hrapay.agents.base import Policy
+from hrapay.agents.bdq import load_bdq_policy
 from hrapay.agents.flat_dqn import load_flat_policy
 from hrapay.agents.static import StaticSchedulePolicy, StaticWithChannelSwitchPolicy
 from hrapay.audit.logger import AuditLogger
@@ -44,6 +45,9 @@ def build_policies(spec: EnvSpec, *, checkpoint_seed: int = 0) -> dict[str, Poli
     flat_ckpt = CHECKPOINTS / f"flat_seed{checkpoint_seed}.pt"
     if flat_ckpt.exists():
         policies["flat_dqn"] = load_flat_policy(spec, flat_ckpt)
+    bdq_ckpt = CHECKPOINTS / f"bdq_seed{checkpoint_seed}.pt"
+    if bdq_ckpt.exists():
+        policies["bdq"] = load_bdq_policy(spec, bdq_ckpt)
     return policies
 
 

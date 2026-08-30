@@ -370,3 +370,101 @@ comparison already exists.
 Tomorrow: the Branching Dueling Q-Network, which has to beat 0.702 on the same
 seeds, the same guard and the same hyperparameters, using 13 output units
 instead of 31.
+
+---
+
+## Day 4 — 30 Aug — the Branching Dueling Q-Network
+
+**Goal:** beat the flat agent using 13 output units instead of 31, with nothing
+else changed.
+
+### The comparison was rigged, and the smoke test caught it
+
+First BDQ run, 12k steps, next to the flat agent at the same step:
+
+```
+flat   step 5000   train return 0.5000
+BDQ    step 5000   train return 0.1604
+```
+
+A three-fold gap in training return that appeared immediately, before either
+network had learned anything. That is not an architecture difference, it is a
+measurement artefact, and the cause was exploration.
+
+The flat agent explores by sampling uniformly over its 31 enumerated actions, so
+P(ABANDON) = 1/31 = 3.2%. The branched agent samples uniformly over each branch,
+so P(ABANDON) = 1/3 = 33%. Abandoning ends the episode immediately, so the
+branched agent was terminating a third of its exploratory episodes on step one
+while the flat agent almost never did. They were exploring different worlds.
+
+My own docstring for `train_bdq` claimed that "the action-space architecture is
+the only thing that differs between the two runs". It was not true when I wrote
+it.
+
+**Fix:** one `sample_random_branched_action` used by both trainers, with the
+flat agent mapping the sampled branched action onto its enumeration via
+`canonicalise_for_flat`. Asserted by
+`test_both_agents_explore_the_same_distribution`, which checks the two samplers
+produce the same P(ABANDON) to within floating-point error.
+
+Worth being blunt about what this cost. Re-running the flat agent under the
+shared exploration scheme dropped its best greedy return from 0.5556 to 0.4855 —
+branch-uniform exploration is genuinely worse for this problem, because a third
+of exploratory episodes end before any retry data is collected. The honest
+reading is that **the flat agent's earlier numbers were flattered by an
+exploration scheme the branched agent could not use**, and the fair comparison
+is the lower pair. Keeping the old flat number and comparing it against a
+BDQ trained under the harsher scheme would have been the easy, wrong move.
+
+### Branch masking
+
+The environment ignores timing when the macro is ABANDON, and ignores channel
+unless the macro is SWITCH_CHANNEL. Trained naively, the timing head would
+receive a gradient from the reward of every ABANDON transition — a learning
+signal for a choice that had no effect on the outcome.
+
+`branch_activity_mask` zeroes the loss on branches that did not influence the
+transition. The TD target still averages across all branches, because at the
+*next* state every branch is a live option; the mask applies only to credit for
+the action actually taken.
+
+### Result: a modest win, and the scaling argument is the real one
+
+60k steps, identical hyperparameters, identical exploration, evaluated over
+1,000 episodes x 3 seeds:
+
+```
+policy                recovered_inr  recovery_rate  wasted  ttr_h  correct_abandon
+bdq                       1,036,141        0.688    1,545   59.0        0.485
+flat_dqn                  1,026,892        0.681    1,649   83.6        0.481
+static_with_switch          880,377        0.583    1,446   49.8        0.414
+static_schedule             536,078        0.346    1,426   63.5        0.310
+```
+
+BDQ is ahead, but by 0.9% on recovered revenue and 0.7 points of recovery rate —
+narrow. It is clearly better on efficiency: 6% fewer wasted retries and a
+time-to-recovery of 59h against 83.6h.
+
+The honest conclusion is not "branching wins big". It is that **branching
+matches the flat head on outcome while using 58% fewer output units, and is
+better on efficiency** — which is what Tavakoli et al. would predict at this
+scale. With 31 flat actions the enumeration is still perfectly tractable; the
+architecture's advantage is a scaling property, and 31 is not yet where scaling
+bites. Adding a sixth payment rail takes flat to 37 outputs and branched to 14;
+adding a second decision dimension multiplies one and merely extends the other.
+
+Claiming a decisive victory off a 0.9% gap would be overclaiming, and a panel
+would be right to push on it.
+
+### Known weakness, to be fixed tomorrow
+
+Both agents are evaluated over 3 seeds, but each has only ONE trained
+checkpoint. The evaluation captures environment variance; it does not capture
+training variance, which for DQN is substantial. A 0.9% gap between two single
+training runs is well inside the noise I should expect. Tomorrow: train both
+agents on 3 seeds each and report mean +/- std, so the comparison says something
+about the architectures rather than about two lucky or unlucky initialisations.
+
+Until that lands, the correct statement about the headline result is that the
+two learned agents are indistinguishable on recovery and the branched one is
+better on efficiency — not that BDQ wins.
