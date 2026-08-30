@@ -249,3 +249,82 @@ def test_aggregate_reports_spread_not_just_the_mean(
 def test_metrics_reject_an_empty_run() -> None:
     with pytest.raises(ValueError, match="empty"):
         compute([], "nobody")
+
+
+# --- comparison logic ------------------------------------------------------
+
+
+def test_comparison_knows_which_direction_is_good() -> None:
+    """Not every metric improves by going up.
+
+    The first version of compare_families assumed higher was always better and
+    duly reported the agent with MORE wasted retries as the winner.
+    """
+    import pandas as pd
+
+    from hrapay.eval.cli import HIGHER_IS_BETTER, compare_families
+
+    summary = pd.DataFrame(
+        {
+            "recovery_rate_mean": [0.70, 0.70],
+            "recovery_rate_std": [0.001, 0.001],
+            "recovered_inr_mean": [1000.0, 1000.0],
+            "recovered_inr_std": [1.0, 1.0],
+            "wasted_attempts_mean": [1500.0, 900.0],  # b is clearly better here
+            "wasted_attempts_std": [10.0, 10.0],
+            "mean_time_to_recovery_h_mean": [50.0, 50.0],
+            "mean_time_to_recovery_h_std": [0.1, 0.1],
+        },
+        index=["a", "b"],
+    )
+    lines = "\n".join(compare_families(summary, "a", "b"))
+    wasted_line = next(ln for ln in lines.splitlines() if "wasted_attempts" in ln)
+    assert "b better" in wasted_line
+
+    assert HIGHER_IS_BETTER["recovery_rate"] is True
+    assert HIGHER_IS_BETTER["wasted_attempts"] is False
+    assert HIGHER_IS_BETTER["issuer_risk_exposure"] is False
+
+
+def test_comparison_refuses_to_call_a_difference_inside_the_noise() -> None:
+    """The check that would have stopped the earlier, wrong 'BDQ wins' claim."""
+    import pandas as pd
+
+    from hrapay.eval.cli import compare_families
+
+    summary = pd.DataFrame(
+        {
+            "recovery_rate_mean": [0.688, 0.681],  # the real gap we saw
+            "recovery_rate_std": [0.022, 0.026],  # dwarfed by the seed spread
+            "recovered_inr_mean": [1.0, 1.0],
+            "recovered_inr_std": [0.1, 0.1],
+            "wasted_attempts_mean": [1.0, 1.0],
+            "wasted_attempts_std": [0.1, 0.1],
+            "mean_time_to_recovery_h_mean": [1.0, 1.0],
+            "mean_time_to_recovery_h_std": [0.1, 0.1],
+        },
+        index=["bdq", "flat_dqn"],
+    )
+    line = next(ln for ln in compare_families(summary, "bdq", "flat_dqn") if "recovery_rate" in ln)
+    assert "INDISTINGUISHABLE" in line
+
+
+def test_single_seed_is_reported_as_unproven() -> None:
+    import pandas as pd
+
+    from hrapay.eval.cli import compare_families
+
+    summary = pd.DataFrame(
+        {
+            "recovery_rate_mean": [0.90, 0.50],  # a huge gap...
+            "recovery_rate_std": [0.0, 0.0],  # ...from one seed each
+            "recovered_inr_mean": [1.0, 1.0],
+            "recovered_inr_std": [0.0, 0.0],
+            "wasted_attempts_mean": [1.0, 1.0],
+            "wasted_attempts_std": [0.0, 0.0],
+            "mean_time_to_recovery_h_mean": [1.0, 1.0],
+            "mean_time_to_recovery_h_std": [0.0, 0.0],
+        },
+        index=["a", "b"],
+    )
+    assert all("unproven" in ln for ln in compare_families(summary, "a", "b"))

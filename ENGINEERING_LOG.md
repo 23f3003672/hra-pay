@@ -468,3 +468,85 @@ about the architectures rather than about two lucky or unlucky initialisations.
 Until that lands, the correct statement about the headline result is that the
 two learned agents are indistinguishable on recovery and the branched one is
 better on efficiency — not that BDQ wins.
+
+---
+
+## Day 5 — 30 Aug — multi-seed evaluation, and retracting yesterday's result
+
+**Goal:** find out whether the flat-vs-branched gap is real.
+
+### It was not. The sign flipped between machines.
+
+Yesterday's comparison, run on two machines with identical code, config and seed:
+
+```
+                 my machine        his machine
+bdq              0.688             0.664
+flat_dqn         0.681             0.673
+                 BDQ ahead         FLAT ahead
+```
+
+The sign of the headline gap reversed. That is as clean a demonstration as one
+could ask for that a 0.9% difference between two single training runs is noise,
+and it retires the claim outright. Good thing to have found on day 5 rather than
+in front of a panel.
+
+The underlying cause is that torch's RNG stream and CPU kernels differ across
+builds (`2.13.0+cpu` versus `2.13.0+cu130`), so "same seed" does not mean "same
+network" across machines. The environment and both static baselines are pure
+numpy and remain bit-identical everywhere — only anything touching a neural net
+diverges. That asymmetry is worth stating in the README rather than letting a
+reviewer discover it.
+
+### Separating two kinds of variance
+
+The evaluation harness was already averaging over 3 evaluation seeds, which
+sounds rigorous and was measuring the wrong thing. Evaluation seeds capture
+*environment* variance — which transactions the policy happens to face. They say
+nothing about *training* variance — which policy the same code happens to
+produce — and for DQN that is the larger of the two by a wide margin.
+
+The harness now:
+
+* trains N checkpoints per architecture (`--seeds 0 1 2`),
+* evaluates each over the evaluation seeds,
+* averages over evaluation seeds FIRST so each training seed contributes exactly
+  one number (otherwise evaluation repeats masquerade as extra evidence about
+  the architecture),
+* reports mean +/- std across training seeds,
+* and runs `compare_families`, which refuses to call a difference real when the
+  gap is smaller than the combined spread across seeds.
+
+The spread is not small. On a short 8k-step probe, best greedy return across
+three seeds was 0.4855 / 0.4916 / 0.5230 for flat and 0.4496 / 0.5668 / 0.5281
+for BDQ — a spread of 0.037 and 0.117 respectively. Yesterday's claimed
+difference was roughly 0.007.
+
+### I got the comparison backwards on the first attempt
+
+`compare_families` initially assumed higher is better for every metric, and duly
+announced `flat_dqn better` on `wasted_attempts` where flat spent 1,031 retries
+and BDQ spent 865. Lower is better there. An automated verdict that is confidently
+backwards is worse than no verdict, because it is designed to be trusted.
+
+Fixed with an explicit `HIGHER_IS_BETTER` map and
+`test_comparison_knows_which_direction_is_good`, which constructs a case where
+b is clearly better on a lower-is-better metric and asserts the verdict says so.
+There is a certain symmetry in the tool built to stop me overclaiming needing a
+test to stop it lying in the other direction.
+
+### What can now be claimed
+
+Across independent runs, only three things survive:
+
+1. Both learned agents beat both static baselines by a very large margin
+   (~64-70% recovery against 58% and 33-35%). Stable, unambiguous.
+2. The branched agent uses 13 output units where the flat one needs 31. A
+   deterministic fact about the architecture, not a measurement.
+3. The branched agent spends consistently fewer wasted retries -- 6-16% fewer
+   in every run so far, and the only learned-vs-learned difference that has
+   survived `compare_families`.
+
+On recovery rate and recovered revenue the two architectures are
+**indistinguishable**, and the submission now says so in the tool output itself
+rather than only in prose.

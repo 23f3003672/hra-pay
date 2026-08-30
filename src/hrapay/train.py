@@ -482,22 +482,41 @@ def main() -> None:
     ap.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     ap.add_argument("--steps", type=int, default=TrainConfig.steps)
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument(
+        "--seeds",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="train one checkpoint per seed. Three seeds is the minimum that says "
+        "anything about training variance.",
+    )
     args = ap.parse_args()
 
     spec = EnvSpec.load(args.spec)
-    cfg = TrainConfig(steps=args.steps, seed=args.seed)
-    out = args.out or CHECKPOINTS / f"{args.agent}_seed{args.seed}.pt"
+    trainer = train_flat if args.agent == "flat" else train_bdq
+    summaries: dict[str, dict] = {}
 
-    if args.agent == "flat":
-        summary = train_flat(spec, cfg, args.config, out)
-    else:
-        summary = train_bdq(spec, cfg, args.config, out)
+    for i, seed in enumerate(args.seeds, start=1):
+        print(f"\n=== {args.agent}  seed {seed}  ({i}/{len(args.seeds)}) ===")
+        cfg = TrainConfig(steps=args.steps, seed=seed)
+        out = CHECKPOINTS / f"{args.agent}_seed{seed}.pt"
+        summary = trainer(spec, cfg, args.config, out)
+        out.with_suffix(".train.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        summaries[str(seed)] = summary
 
-    log = out.with_suffix(".train.json")
-    log.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(f"wrote {log}")
+    if len(args.seeds) > 1:
+        bests = [s["best_greedy_return"] for s in summaries.values()]
+        spread = max(bests) - min(bests)
+        print(f"\n=== {args.agent}: {len(args.seeds)} seeds ===")
+        for seed, s in summaries.items():
+            print(
+                f"  seed {seed}: best greedy {s['best_greedy_return']:.4f} at step {s['best_step']:,}"
+            )
+        print(f"  mean {np.mean(bests):.4f}  std {np.std(bests):.4f}  spread {spread:.4f}")
+        print(
+            "  Any claimed difference between architectures smaller than this spread "
+            "is not a result."
+        )
 
 
 if __name__ == "__main__":

@@ -98,7 +98,7 @@
     }
   ],
   "episodes": 17375,
-  "seconds": 517.5,
+  "seconds": 461.3,
   "best_greedy_return": 0.4673,
   "best_step": 10000,
   "final_greedy_return": 0.25

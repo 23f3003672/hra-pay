@@ -30,12 +30,16 @@ TASKS: dict[str, list[list[str]]] = {
     "calibrate": [[PY, "-m", "hrapay.rewards.calibrator"]],
     "calibrate-dry": [[PY, "-m", "hrapay.rewards.calibrator", "--dry-run"]],
     "train": [
-        [PY, "-m", "hrapay.train", "--agent", "flat", "--steps", "60000"],
-        [PY, "-m", "hrapay.train", "--agent", "bdq", "--steps", "60000"],
+        [PY, "-m", "hrapay.train", "--agent", "flat", "--steps", "60000", "--seeds", "0", "1", "2"],
+        [PY, "-m", "hrapay.train", "--agent", "bdq", "--steps", "60000", "--seeds", "0", "1", "2"],
     ],
-    "train-flat": [[PY, "-m", "hrapay.train", "--agent", "flat", "--steps", "60000"]],
-    "train-bdq": [[PY, "-m", "hrapay.train", "--agent", "bdq", "--steps", "60000"]],
-    "eval": [[PY, "-m", "hrapay.eval.cli", "--episodes", "1000", "--seeds", "3"]],
+    "train-flat": [
+        [PY, "-m", "hrapay.train", "--agent", "flat", "--steps", "60000", "--seeds", "0", "1", "2"]
+    ],
+    "train-bdq": [
+        [PY, "-m", "hrapay.train", "--agent", "bdq", "--steps", "60000", "--seeds", "0", "1", "2"]
+    ],
+    "eval": [[PY, "-m", "hrapay.eval.cli", "--episodes", "1000", "--eval-seeds", "3"]],
     "priors": [[PY, "-m", "hrapay.env.demo", "--episodes", "1", "--refresh-priors"]],
 }
 

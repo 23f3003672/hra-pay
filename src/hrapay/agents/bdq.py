@@ -53,9 +53,9 @@ def branch_activity_mask(macro_indices: np.ndarray | torch.Tensor) -> np.ndarray
     """
     m = np.asarray(macro_indices).reshape(-1)
     mask = np.zeros((len(m), 3), dtype=np.float32)
-    mask[:, 0] = 1.0                      # macro always matters
-    mask[:, 1] = (m != ABANDON_IDX)       # timing matters unless abandoning
-    mask[:, 2] = (m == SWITCH_IDX)        # channel matters only when switching
+    mask[:, 0] = 1.0  # macro always matters
+    mask[:, 1] = m != ABANDON_IDX  # timing matters unless abandoning
+    mask[:, 2] = m == SWITCH_IDX  # channel matters only when switching
     return mask
 
 

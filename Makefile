@@ -38,11 +38,11 @@ calibrate:
 	$(PY) -m hrapay.rewards.calibrator
 
 train:
-	$(PY) -m hrapay.train --agent flat --steps 60000
-	$(PY) -m hrapay.train --agent bdq --steps 60000
+	$(PY) -m hrapay.train --agent flat --steps 60000 --seeds 0 1 2
+	$(PY) -m hrapay.train --agent bdq --steps 60000 --seeds 0 1 2
 
 eval:
-	$(PY) -m hrapay.eval.cli --episodes 1000 --seeds 3
+	$(PY) -m hrapay.eval.cli --episodes 1000 --eval-seeds 3
 
 priors:
 	$(PY) -m hrapay.env.demo --episodes 1 --refresh-priors

@@ -1,0 +1,105 @@
+{
+  "history": [
+    {
+      "step": 5000,
+      "epsilon": 0.8417,
+      "episodes": 2263,
+      "train_return_200": 0.1526,
+      "greedy_return": 0.5177,
+      "is_best": true
+    },
+    {
+      "step": 10000,
+      "epsilon": 0.6833,
+      "episodes": 4340,
+      "train_return_200": 0.1952,
+      "greedy_return": 0.4645,
+      "is_best": false
+    },
+    {
+      "step": 15000,
+      "epsilon": 0.525,
+      "episodes": 6247,
+      "train_return_200": 0.2562,
+      "greedy_return": 0.5059,
+      "is_best": false
+    },
+    {
+      "step": 20000,
+      "epsilon": 0.3667,
+      "episodes": 8051,
+      "train_return_200": 0.2905,
+      "greedy_return": 0.4873,
+      "is_best": false
+    },
+    {
+      "step": 25000,
+      "epsilon": 0.2083,
+      "episodes": 9629,
+      "train_return_200": 0.3307,
+      "greedy_return": 0.396,
+      "is_best": false
+    },
+    {
+      "step": 30000,
+      "epsilon": 0.05,
+      "episodes": 11003,
+      "train_return_200": 0.4631,
+      "greedy_return": 0.442,
+      "is_best": false
+    },
+    {
+      "step": 35000,
+      "epsilon": 0.05,
+      "episodes": 12268,
+      "train_return_200": 0.349,
+      "greedy_return": 0.3846,
+      "is_best": false
+    },
+    {
+      "step": 40000,
+      "epsilon": 0.05,
+      "episodes": 13464,
+      "train_return_200": 0.3273,
+      "greedy_return": 0.3462,
+      "is_best": false
+    },
+    {
+      "step": 45000,
+      "epsilon": 0.05,
+      "episodes": 14662,
+      "train_return_200": 0.3452,
+      "greedy_return": 0.3468,
+      "is_best": false
+    },
+    {
+      "step": 50000,
+      "epsilon": 0.05,
+      "episodes": 15857,
+      "train_return_200": 0.312,
+      "greedy_return": 0.3381,
+      "is_best": false
+    },
+    {
+      "step": 55000,
+      "epsilon": 0.05,
+      "episodes": 17028,
+      "train_return_200": 0.3394,
+      "greedy_return": 0.2722,
+      "is_best": false
+    },
+    {
+      "step": 60000,
+      "epsilon": 0.05,
+      "episodes": 18200,
+      "train_return_200": 0.3405,
+      "greedy_return": 0.3073,
+      "is_best": false
+    }
+  ],
+  "episodes": 18200,
+  "seconds": 532.7,
+  "best_greedy_return": 0.5177,
+  "best_step": 5000,
+  "final_greedy_return": 0.3073
+}
