@@ -1,0 +1,123 @@
+{
+  "schema_version": "penalty_table/v1",
+  "spec_version": "spec_train/v1",
+  "source": "gemini-3.7-flash",
+  "prompt_fingerprint": "c07895002fe55827",
+  "generated_at": "2026-08-30T06:03:23+00:00",
+  "review": {
+    "reviewed": true,
+    "reviewed_by": "Pratham Agarwal",
+    "reviewed_at": "2026-08-30",
+    "notes": "Reviewed all 8 entries. 5 accepted as scored. 3 overridden -- all for the same root cause: the prompt asked how much friction 'retrying this decline reason' carries, but the reward function applies the returned number to every action taken on that code, including channel switches and delayed retries that specifically defeat the decline reason. The model answered the question it was asked; the question was underspecified. Overrides correct for that. The principled fix is action-conditional friction (see ENGINEERING_LOG, Day 3)."
+  },
+  "entries": {
+    "account_closed": {
+      "friction_penalty": 10.0,
+      "severity": "SEVERE",
+      "retry_advisable": false,
+      "justification": "Retrying against a permanently closed account is entirely futile and risks triggering issuer velocity and abuse blocks.",
+      "llm_raw": {
+        "friction_penalty": 10.0,
+        "severity": "SEVERE",
+        "retry_advisable": false
+      },
+      "human_override": null
+    },
+    "authentication_failed": {
+      "friction_penalty": 2.0,
+      "severity": "BENIGN",
+      "retry_advisable": true,
+      "justification": "Failed 3-D Secure authentication is a routine customer-side drop-off that carries negligible issuer friction when retried with a new session.",
+      "llm_raw": {
+        "friction_penalty": 2.0,
+        "severity": "BENIGN",
+        "retry_advisable": true
+      },
+      "human_override": null
+    },
+    "do_not_honor": {
+      "friction_penalty": 5.0,
+      "severity": "HIGH",
+      "retry_advisable": false,
+      "justification": "Generic declines typically reflect unstated issuer risk blocks where automated retries erode network reputation and waste spend.",
+      "llm_raw": {
+        "friction_penalty": 7.0,
+        "severity": "HIGH",
+        "retry_advisable": false
+      },
+      "human_override": {
+        "friction_penalty": 5.0,
+        "was": 7.0,
+        "reason": "Sound for repeated retries on the same instrument, but do_not_honor is the largest recoverable segment in the population and an alternate rail often clears it. 7.0 suppressed first-time rail switches along with the wasteful repeats. Lowered to price the repeats without killing the recovery."
+      }
+    },
+    "expired_card": {
+      "friction_penalty": 4.0,
+      "severity": "SEVERE",
+      "retry_advisable": false,
+      "justification": "Submitting authorisations on expired instruments is guaranteed to fail and generates negative compliance signals with card networks.",
+      "llm_raw": {
+        "friction_penalty": 9.0,
+        "severity": "SEVERE",
+        "retry_advisable": false
+      },
+      "human_override": {
+        "friction_penalty": 4.0,
+        "was": 9.0,
+        "reason": "The model scored 'retrying an expired instrument', which is correct and futile. But this penalty is applied to EVERY action on this decline code, including a switch to a different payment rail -- which does not touch the expired card and is the one recovery that works. At 9.0 the reward would suppress the correct action. Lowered so same-instrument retries stay uneconomic while a rail switch remains viable."
+      }
+    },
+    "insufficient_funds": {
+      "friction_penalty": 4.0,
+      "severity": "MODERATE",
+      "retry_advisable": true,
+      "justification": "Retrying an active account for insufficient funds is standard practice, provided retry cadence is throttled to avoid issuer irritation.",
+      "llm_raw": {
+        "friction_penalty": 4.0,
+        "severity": "MODERATE",
+        "retry_advisable": true
+      },
+      "human_override": null
+    },
+    "issuer_unavailable": {
+      "friction_penalty": 1.0,
+      "severity": "BENIGN",
+      "retry_advisable": true,
+      "justification": "Temporary network and host timeouts represent routine operational retries that carry no fraud or compliance risk.",
+      "llm_raw": {
+        "friction_penalty": 1.0,
+        "severity": "BENIGN",
+        "retry_advisable": true
+      },
+      "human_override": null
+    },
+    "suspected_fraud": {
+      "friction_penalty": 10.0,
+      "severity": "SEVERE",
+      "retry_advisable": false,
+      "justification": "Retrying a transaction flagged by an issuer risk engine creates critical fraud exposure and risks immediate gateway-level throttling.",
+      "llm_raw": {
+        "friction_penalty": 10.0,
+        "severity": "SEVERE",
+        "retry_advisable": false
+      },
+      "human_override": null
+    },
+    "transaction_limit_exceeded": {
+      "friction_penalty": 3.5,
+      "severity": "HIGH",
+      "retry_advisable": false,
+      "justification": "Retrying before the cardholder modifies their daily or per-transaction spend limit will fail and produce unnecessary issuer friction.",
+      "llm_raw": {
+        "friction_penalty": 6.0,
+        "severity": "HIGH",
+        "retry_advisable": false
+      },
+      "human_override": {
+        "friction_penalty": 3.5,
+        "was": 6.0,
+        "reason": "The justification says a retry 'before the cardholder modifies their limit' will fail. That misses the time dimension: daily and per-transaction limits reset without any customer action, so a delayed retry is legitimate rather than futile. 6.0 penalised patience, which is exactly the behaviour this agent is supposed to learn."
+      }
+    }
+  }
+}

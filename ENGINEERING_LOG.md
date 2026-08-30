@@ -185,3 +185,188 @@ naive one, which is why both are reported — comparing the learned agent only
 against the weaker baseline would inflate its apparent advantage.
 
 Tomorrow: LLM reward calibration, and the flat DQN that has to beat these.
+
+---
+
+## Day 3 — 30 Aug — LLM reward calibration and the flat DQN
+
+**Goal:** replace the placeholder friction table with a calibrated one, and get
+the first learned policy beating the baselines.
+
+### The calibration prompt is the place this project could quietly cheat
+
+The friction penalty is supposed to come from an LLM *reading decline text*. The
+easy version of that is to hand the model everything I know about each decline
+code and let it produce a sensible number. That would have been worthless: the
+spec contains the ground-truth success probabilities, so a prompt containing
+them would make "LLM calibration" a laundering step that copies the answer into
+the reward function. Every downstream result would be circular.
+
+So the prompt is built from `raw_reason_text` and nothing else — the free-text
+string a gateway actually returns. `test_prompt_contains_no_success_probabilities`
+walks every `base_success` value, every `time_multiplier` and every
+`terminal_prob` in the spec and asserts none of them appear as a substring of
+the prompt. It is the most important test in the repo, because it is the one
+protecting against a mistake that would still *look* like it worked.
+
+`--dry-run` prints the exact prompt so a reviewer can check this by eye rather
+than taking the test's word for it.
+
+### The review gate is enforced in code, not by good intentions
+
+`CalibratedFrictionTable` raises `UnreviewedTableError` and refuses to load
+unless `review.reviewed` is true. Training cannot start against an unreviewed
+table. This matters because "a human reviews the LLM output" is the kind of
+claim every project makes in a slide and almost none enforce — and the value of
+the claim is entirely in the enforcement.
+
+The table keeps the model's raw output under `llm_raw` permanently, alongside
+any `human_override` with a written reason. The diff between them is the
+artefact: it shows where a person actually disagreed with the model, rather than
+asserting that review happened.
+
+### Unknown decline codes default to expensive, not free
+
+`penalty_for` returns 7.0 for a decline code the table has never seen, not 0.0.
+Zero would have been the natural default and it is the wrong one: an
+uncalibrated reason is one nobody has assessed, and assuming an unassessed
+reason is safe to retry gets the asymmetry backwards. This is not hypothetical —
+the Day 7 held-out environment introduces a decline code the table was never
+calibrated on, specifically to exercise this path.
+
+### Getting a working LLM call took three failures
+
+The calibration call failed three times in a row, each for a different reason,
+and each one changed the code.
+
+**404 NOT_FOUND.** `gemini-2.5-flash` is retired for newly issued API keys. The
+error helpfully suggested `gemini-3.6-flash` — which was not in the list of
+models the key could actually reach, so following the error message would have
+failed differently. Switched to `gemini-flash-latest`, a stable alias that was
+in the list. That trades a pinned model for a floating one, so the script now
+also records `response.model_version` — whatever concretely answered — as the
+table's `source`. The request target floats so the script keeps working; the
+provenance stays pinned so the table says exactly what produced it.
+
+**429 RESOURCE_EXHAUSTED, prepayment credits depleted.** The AI Studio project
+was on prepaid billing with a zero balance. Fixed outside the code by creating a
+fresh project, which lands on the free tier.
+
+**503 UNAVAILABLE, high demand.** This one was my fault. The script made a
+single call to a third-party API with no retry and no alternative, so a
+transient capacity spike on Google's side blocked the entire build. That is a
+bad pattern anywhere and an embarrassing one in a project judged partly on
+failure recovery.
+
+Rewritten with exponential backoff (4 attempts, 2/4/8s plus jitter) across a
+chain of five models. Crucially it distinguishes transient from permanent
+failures: a 503 is retried, but a depleted quota or a retired model id fails
+immediately and moves to the next candidate. Burning forty seconds of backoff
+on an error that will never clear is worse than failing fast. The next run
+logged three transient failures and then succeeded, served by `gemini-3.7-flash`.
+
+### The human review found three errors, all caused by my prompt
+
+The gate did its job, which was genuinely surprising — I had half expected to
+read eight sensible numbers and rubber-stamp them.
+
+Five entries were accepted as scored. Three were overridden, and all three
+failed for the same reason:
+
+| code | LLM | final | defect |
+|---|---|---|---|
+| `expired_card` | 9.0 | 4.0 | "Submitting on an expired instrument is guaranteed to fail" — true, but a switch to another rail does not touch the expired card, and that is the recovery that works |
+| `transaction_limit_exceeded` | 6.0 | 3.5 | "Retrying before the cardholder modifies their limit will fail" — misses that limits reset on their own, so 6.0 penalised patience |
+| `do_not_honor` | 7.0 | 5.0 | Sound for repeated same-instrument retries, but this is the largest recoverable segment and an alternate rail often clears it |
+
+The model was not wrong. **My prompt was underspecified.** It asked how much
+friction "retrying this decline reason" carries, and the model answered exactly
+that — but the reward function applies the returned number to *every* action on
+that code, including the channel switch or delayed retry that specifically
+defeats the decline reason. Same number, two different questions.
+
+The principled fix is action-conditional friction: `penalty(decline_code,
+proposed_action)` rather than `penalty(decline_code)`. That is a real change to
+the reward interface and is recorded as future work rather than rebuilt with
+five days left. The overrides correct for it in the meantime, each with the
+defect written down.
+
+I deliberately did NOT override `insufficient_funds` at 4.0, though I would have
+guessed 2.0. Overriding on a difference of opinion rather than an identified
+error would make the override log meaningless — its whole value is that every
+entry in it has a specific defect behind it.
+
+### The last checkpoint was 37% worse than the best one
+
+First trained run, reading the printed curve:
+
+```
+step 30000  mean return 0.6132
+step 45000  mean return 0.5174
+step 60000  mean return 0.4007
+```
+
+Return climbing to step 30k and then falling away, with epsilon already at its
+0.05 floor since step 30k — so this was not exploration noise. And the trainer
+was saving the *final* network.
+
+Two things were wrong. First, the statistic: training return is measured with
+exploration switched on and mixes recoverable episodes with hopeless ones, so it
+is a poor guide to how the deployed greedy policy behaves. Second, and worse,
+model selection: keeping the last checkpoint assumes monotone improvement, which
+DQN does not provide.
+
+Added a periodic greedy evaluation over 300 episodes on a fixed seed block the
+training loop never visits, and kept the best-scoring network rather than the
+last. The instrumented run made the size of the problem obvious:
+
+```
+step 30000  train 0.5594  greedy 0.5556  <- best
+step 45000  train 0.5092  greedy 0.4471
+step 60000  train 0.4204  greedy 0.3486
+best greedy return 0.5556 at step 30,000 (final step scored 0.3486)
+```
+
+The checkpoint being shipped was 37% worse than one the same run had already
+passed through. Fixing selection improved every headline metric at once,
+including the one the agent had been losing on:
+
+```
+                  recovered_inr  recovery_rate  wasted  correct_abandon
+last checkpoint       1,008,673        0.654    1,835        0.460
+best checkpoint       1,050,257        0.702    1,552        0.497
+```
+
+Why the decline happens at all is not fully diagnosed — most likely the replay
+buffer filling with on-policy data once epsilon floors, narrowing the state
+distribution the network is fit on. Worth noting honestly rather than claiming a
+diagnosis I have not earned. Best-checkpoint selection is the right engineering
+answer regardless, and it now protects the branched agent too.
+
+### Where the learned agent is WORSE, and why it is being reported
+
+Final Day-3 comparison, 1,000 episodes x 3 seeds:
+
+```
+policy                recovered_inr  recovery_rate  wasted  issuer_risk  ttr_h
+flat_dqn                  1,050,257        0.702    1,552        0       43.8
+static_with_switch          880,377        0.583    1,446        0       49.8
+static_schedule             536,078        0.346    1,426        0       63.5
+```
+
+`wasted_attempts`: 1,552 against the best baseline's 1,446. The agent still
+spends about 7% more retries than the static schedule to buy its extra 12 points
+of recovery rate. Smaller than the 27% gap before checkpoint selection was
+fixed, but real, and whether it is a good trade depends on issuer economics this
+synthetic environment only approximates. It goes in the README table and in the
+video. Reporting only `recovered_inr` and `recovery_rate` would hide it.
+
+### End of day
+
+66 tests passing. The flat DQN is a working, evaluated fallback submission — if
+the branched agent goes wrong over the next two days, a complete three-policy
+comparison already exists.
+
+Tomorrow: the Branching Dueling Q-Network, which has to beat 0.702 on the same
+seeds, the same guard and the same hyperparameters, using 13 output units
+instead of 31.

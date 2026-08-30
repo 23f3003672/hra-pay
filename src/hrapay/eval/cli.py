@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 
 from hrapay.agents.base import Policy
+from hrapay.agents.flat_dqn import load_flat_policy
 from hrapay.agents.static import StaticSchedulePolicy, StaticWithChannelSwitchPolicy
 from hrapay.audit.logger import AuditLogger
 from hrapay.env.demo import load_priors
@@ -23,6 +24,7 @@ from hrapay.env.spec import EnvSpec
 from hrapay.eval.metrics import Metrics, aggregate_seeds, compute
 from hrapay.eval.runner import EpisodeRunner
 from hrapay.guard.policy_guard import GuardConfig, PolicyGuard
+from hrapay.rewards.friction_table import CalibratedFrictionTable
 from hrapay.rewards.reward import CalibratedReward, RewardConfig
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -31,11 +33,18 @@ DEFAULT_CONFIG = ROOT / "configs" / "default.yaml"
 RESULTS = ROOT / "results"
 
 
-def build_policies(spec: EnvSpec) -> dict[str, Policy]:
-    return {
+CHECKPOINTS = ROOT / "checkpoints"
+
+
+def build_policies(spec: EnvSpec, *, checkpoint_seed: int = 0) -> dict[str, Policy]:
+    policies: dict[str, Policy] = {
         "static_schedule": StaticSchedulePolicy(spec),
         "static_with_switch": StaticWithChannelSwitchPolicy(spec),
     }
+    flat_ckpt = CHECKPOINTS / f"flat_seed{checkpoint_seed}.pt"
+    if flat_ckpt.exists():
+        policies["flat_dqn"] = load_flat_policy(spec, flat_ckpt)
+    return policies
 
 
 def evaluate(
@@ -49,7 +58,7 @@ def evaluate(
     seed: int,
     audit_path: Path | None,
 ) -> Metrics:
-    reward = CalibratedReward(reward_cfg)
+    reward = CalibratedReward(reward_cfg, friction_table=CalibratedFrictionTable.load())
     env = RetryEnv(spec, seed=seed, channel_priors=priors, reward_fn=reward)
     guard = PolicyGuard(guard_cfg, timing_order=spec.time_buckets)
 

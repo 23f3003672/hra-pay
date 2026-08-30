@@ -1,4 +1,4 @@
-.PHONY: help install dev test lint fmt env-demo eval priors clean
+.PHONY: help install dev test lint fmt env-demo calibrate train eval priors clean
 
 PY ?= python3
 
@@ -10,6 +10,8 @@ help:
 	@echo "  make lint       ruff check"
 	@echo "  make fmt        ruff format + autofix"
 	@echo "  make env-demo   roll out the environment under a random policy"
+	@echo "  make calibrate  run the offline LLM reward calibration"
+	@echo "  make train      train the flat DQN"
 	@echo "  make eval       evaluate all policies and write results/"
 	@echo "  make priors     recompute the empirical channel-success priors"
 
@@ -31,6 +33,12 @@ fmt:
 
 env-demo:
 	$(PY) -m hrapay.env.demo --episodes 5
+
+calibrate:
+	$(PY) -m hrapay.rewards.calibrator
+
+train:
+	$(PY) -m hrapay.train --agent flat --steps 60000
 
 eval:
 	$(PY) -m hrapay.eval.cli --episodes 1000 --seeds 3
