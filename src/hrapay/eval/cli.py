@@ -46,6 +46,7 @@ from hrapay.rewards.reward import CalibratedReward, RewardConfig
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SPEC = ROOT / "configs" / "spec_train.yaml"
+TRAIN_SPEC = ROOT / "configs" / "spec_train.yaml"
 DEFAULT_CONFIG = ROOT / "configs" / "default.yaml"
 CHECKPOINTS = ROOT / "checkpoints"
 RESULTS = ROOT / "results"
@@ -73,8 +74,13 @@ HIGHER_IS_BETTER: dict[str, bool] = {
 }
 
 
-def discover_policies(spec: EnvSpec) -> list[tuple[str, int | None, Policy]]:
-    """(family, train_seed, policy). Static policies have no training seed."""
+def discover_policies(spec: EnvSpec, train_spec: EnvSpec) -> list[tuple[str, int | None, Policy]]:
+    """(family, train_seed, policy). Static policies have no training seed.
+
+    Checkpoints are loaded against the TRAINING spec, not the evaluation one.
+    A checkpoint's architecture is fixed by how it was trained; evaluating it
+    on a shifted distribution must not silently reinterpret its inputs.
+    """
     found: list[tuple[str, int | None, Policy]] = [
         ("static_schedule", None, StaticSchedulePolicy(spec)),
         ("static_with_switch", None, StaticWithChannelSwitchPolicy(spec)),
@@ -85,7 +91,7 @@ def discover_policies(spec: EnvSpec) -> list[tuple[str, int | None, Policy]]:
     for prefix, loader in loaders.items():
         for ckpt in sorted(CHECKPOINTS.glob(f"{prefix}_seed*.pt")):
             seed = int(ckpt.stem.split("seed")[-1])
-            found.append((families[prefix], seed, loader(spec, ckpt)))
+            found.append((families[prefix], seed, loader(train_spec, ckpt)))
     return found
 
 
@@ -99,10 +105,17 @@ def evaluate_one(
     priors: dict,
     episodes: int,
     eval_seed: int,
+    observation_codes: list[str],
     audit_path: Path | None = None,
 ) -> Metrics:
     reward = CalibratedReward(reward_cfg, friction_table=friction)
-    env = RetryEnv(spec, seed=eval_seed, channel_priors=priors, reward_fn=reward)
+    env = RetryEnv(
+        spec,
+        seed=eval_seed,
+        channel_priors=priors,
+        reward_fn=reward,
+        observation_codes=observation_codes,
+    )
     guard = PolicyGuard(guard_cfg, timing_order=spec.time_buckets)
 
     audit = AuditLogger(audit_path, keep_in_memory=False) if audit_path else None
@@ -151,19 +164,33 @@ def main() -> None:
     ap.add_argument("--episodes", type=int, default=1000)
     ap.add_argument("--eval-seeds", type=int, default=3)
     ap.add_argument("--tag", type=str, default="train", help="suffix for the results files")
+    ap.add_argument(
+        "--train-spec",
+        type=Path,
+        default=TRAIN_SPEC,
+        help="spec the checkpoints were trained on; fixes the observation vocabulary",
+    )
     args = ap.parse_args()
 
     spec = EnvSpec.load(args.spec)
+    train_spec = EnvSpec.load(args.train_spec)
     reward_cfg = RewardConfig.load(args.config)
     guard_cfg = GuardConfig.load(args.config)
     friction = CalibratedFrictionTable.load()
-    priors = load_priors(spec)
+    # Priors are historical data the merchant already had; under distribution
+    # shift they are stale, exactly as they would be in production.
+    priors = load_priors(train_spec)
     RESULTS.mkdir(parents=True, exist_ok=True)
 
-    policies = discover_policies(spec)
+    policies = discover_policies(spec, train_spec)
     learned = [f for f, s, _ in policies if s is not None]
     print(f"spec={spec.version}  episodes={args.episodes}  eval seeds={args.eval_seeds}")
-    print(f"checkpoints found: {len(learned)}  ({', '.join(sorted(set(learned))) or 'none'})\n")
+    print(f"checkpoints found: {len(learned)}  ({', '.join(sorted(set(learned))) or 'none'})")
+    unseen = set(spec.decline_code_names) - set(train_spec.decline_code_names)
+    if unseen:
+        print(f"decline codes NOT seen during training: {sorted(unseen)}")
+        print("  -> all-zero one-hot, no channel priors, default friction penalty")
+    print()
 
     rows: list[dict] = []
     for family, train_seed, policy in policies:
@@ -182,6 +209,7 @@ def main() -> None:
                 priors=priors,
                 episodes=args.episodes,
                 eval_seed=eval_seed,
+                observation_codes=train_spec.decline_code_names,
                 audit_path=audit_path,
             )
             rows.append(

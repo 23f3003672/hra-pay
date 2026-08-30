@@ -116,9 +116,19 @@ class RetryEnv(gym.Env[np.ndarray, np.ndarray]):
         channel_priors: dict[str, dict[str, float]] | None = None,
         friction_table: FrictionTable | None = None,
         reward_fn: RewardFn | None = None,
+        observation_codes: list[str] | None = None,
     ) -> None:
         super().__init__()
         self.spec = spec
+
+        # The one-hot vocabulary for decline codes is fixed at TRAINING time and
+        # passed in explicitly when evaluating on a shifted spec. A deployed
+        # model cannot grow an input feature because the payment processor
+        # introduced a new decline reason: the code simply arrives, reads as an
+        # all-zero one-hot, and the policy has to cope with what is left. That is
+        # the realistic failure and it is what the held-out spec measures.
+        self.observation_codes = observation_codes or spec.decline_code_names
+        self.unseen_codes: set[str] = set(spec.decline_code_names) - set(self.observation_codes)
         self.channel_priors = channel_priors or {}
         self.friction_table: FrictionTable = friction_table or ZeroFrictionTable()
         self.reward_fn: RewardFn = reward_fn or _DefaultReward()
@@ -149,7 +159,7 @@ class RetryEnv(gym.Env[np.ndarray, np.ndarray]):
 
     def _build_feature_names(self) -> list[str]:
         s = self.spec
-        names = [f"decline={c}" for c in s.decline_code_names]
+        names = [f"decline={c}" for c in self.observation_codes]
         names.append("friction_penalty")
         names += [f"elapsed={b}" for b in ELAPSED_BUCKETS]
         names += ["retry_count_channel", "retry_count_total"]
@@ -166,7 +176,8 @@ class RetryEnv(gym.Env[np.ndarray, np.ndarray]):
         ep = self.episode
         v: list[float] = []
 
-        v += [1.0 if c == ep.decline_code else 0.0 for c in s.decline_code_names]
+        # An unseen code produces an all-zero block here, by design.
+        v += [1.0 if c == ep.decline_code else 0.0 for c in self.observation_codes]
         v.append(self.friction_table.penalty_for(ep.decline_code) / 10.0)
 
         bucket = _elapsed_bucket(self._last_gap_hours)

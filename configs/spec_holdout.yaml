@@ -1,0 +1,287 @@
+# =============================================================================
+# HRA-Pay ground-truth specification — HELD-OUT / SHIFTED distribution
+# =============================================================================
+# The agents are trained on spec_train.yaml and NEVER see this file. It exists
+# to answer the sharpest objection this project faces: that the environment was
+# designed by the same person whose agent is evaluated in it, so of course the
+# agent wins.
+#
+# The shift is deliberately adversarial rather than cosmetic. It does not merely
+# add noise — it INVERTS several of the relationships the agent most likely
+# learned to rely on:
+#
+#   1. Delay stops paying off for insufficient_funds. In training, waiting 72h
+#      multiplied success by 1.45. Here it is 1.15. An agent that learned
+#      "always wait" is now wrong.
+#
+#   2. Channel switching stops paying off for do_not_honor. In training, UPI
+#      (0.31) beat the original instrument (0.13) by more than 2x. Here the
+#      original instrument is BETTER (0.20 vs 0.16). The learned preference is
+#      backwards.
+#
+#   3. Payday moves. Salary credits land on the 5th-7th and 20th-22nd instead of
+#      the 1st-3rd and 28th-31st, so the payday feature actively misleads.
+#
+#   4. A decline code that did not exist during training appears:
+#      mandate_revoked. The agent has no one-hot slot for it (it reads as all
+#      zeros), has no channel-success priors for it, and the LLM penalty table
+#      was never calibrated on it — so it falls through to the default high
+#      friction of 7.0. This is the realistic deployment failure: a payment
+#      processor ships a new decline reason and nobody retrains.
+#
+#   5. The population is harder. Terminal probabilities are higher across the
+#      board, so more transactions are genuinely unrecoverable.
+#
+# We expect every policy to degrade here. The question the results table answers
+# is whether the LEARNED agents degrade worse than the static ones — which is
+# what would show they had memorised the training distribution rather than
+# learned a policy.
+# =============================================================================
+
+version: "spec_holdout/v1"
+description: "Held-out distribution. Inverted timing and channel effects, moved payday, one unseen decline code, harder population."
+
+channels: [UPI, CREDIT_CARD, DEBIT_CARD, NETBANKING, WALLET]
+
+time_buckets: [NOW, PLUS_2H, PLUS_6H, PLUS_24H, PLUS_72H]
+
+time_bucket_hours:
+  NOW: 0
+  PLUS_2H: 2
+  PLUS_6H: 6
+  PLUS_24H: 24
+  PLUS_72H: 72
+
+decline_codes:
+
+  # SHIFT 1: patience stops paying. Training rewarded PLUS_72H at 1.45x; here
+  # the curve is nearly flat, and the payday lift is smaller too.
+  insufficient_funds:
+    weight: 0.22
+    terminal_prob: 0.18
+    payday_sensitive: true
+    raw_reason_text: >-
+      Transaction declined by issuing bank: available balance is lower than the
+      transaction amount. Customer account is active and in good standing.
+    base_success:
+      SAME: 0.24
+      UPI: 0.26
+      CREDIT_CARD: 0.30
+      DEBIT_CARD: 0.22
+      NETBANKING: 0.21
+      WALLET: 0.17
+    time_multiplier:
+      NOW: 0.55
+      PLUS_2H: 0.70
+      PLUS_6H: 0.88
+      PLUS_24H: 1.05
+      PLUS_72H: 1.15
+
+  # SHIFT 2: the channel preference INVERTS. In training UPI beat the original
+  # instrument 0.31 to 0.13. Here the original instrument wins.
+  do_not_honor:
+    weight: 0.20
+    terminal_prob: 0.38
+    payday_sensitive: false
+    raw_reason_text: >-
+      Issuer declined the transaction without providing a specific reason
+      (do not honour). No further detail supplied by the card network.
+    base_success:
+      SAME: 0.20
+      UPI: 0.16
+      CREDIT_CARD: 0.14
+      DEBIT_CARD: 0.13
+      NETBANKING: 0.15
+      WALLET: 0.12
+    time_multiplier:
+      NOW: 0.70
+      PLUS_2H: 0.90
+      PLUS_6H: 1.00
+      PLUS_24H: 0.95
+      PLUS_72H: 0.85
+
+  # SHIFT 3: the transient outage clears more slowly, so a fast retry is worse.
+  issuer_unavailable:
+    weight: 0.12
+    terminal_prob: 0.08
+    payday_sensitive: false
+    raw_reason_text: >-
+      Could not reach the issuing bank's authorisation host. The request timed
+      out at the network layer. This is a temporary infrastructure condition.
+    base_success:
+      SAME: 0.42
+      UPI: 0.45
+      CREDIT_CARD: 0.40
+      DEBIT_CARD: 0.38
+      NETBANKING: 0.36
+      WALLET: 0.44
+    time_multiplier:
+      NOW: 0.60
+      PLUS_2H: 0.85
+      PLUS_6H: 1.20
+      PLUS_24H: 1.30
+      PLUS_72H: 1.15
+
+  authentication_failed:
+    weight: 0.11
+    terminal_prob: 0.20
+    payday_sensitive: false
+    raw_reason_text: >-
+      Customer failed additional factor authentication. The OTP was not entered
+      or was entered incorrectly before the 3-D Secure session expired.
+    base_success:
+      SAME: 0.28
+      UPI: 0.35
+      CREDIT_CARD: 0.26
+      DEBIT_CARD: 0.25
+      NETBANKING: 0.30
+      WALLET: 0.32
+    time_multiplier:
+      NOW: 0.95
+      PLUS_2H: 1.00
+      PLUS_6H: 0.92
+      PLUS_24H: 0.78
+      PLUS_72H: 0.60
+
+  transaction_limit_exceeded:
+    weight: 0.08
+    terminal_prob: 0.14
+    payday_sensitive: false
+    raw_reason_text: >-
+      The transaction exceeds a limit configured on the customer's account,
+      such as a per-transaction ceiling or a cumulative daily spend cap.
+    base_success:
+      SAME: 0.18
+      UPI: 0.22
+      CREDIT_CARD: 0.28
+      DEBIT_CARD: 0.16
+      NETBANKING: 0.30
+      WALLET: 0.12
+    time_multiplier:
+      NOW: 0.30
+      PLUS_2H: 0.40
+      PLUS_6H: 0.60
+      PLUS_24H: 1.15
+      PLUS_72H: 1.20
+
+  # SHIFT: the best alternate rail changes from UPI to NETBANKING.
+  expired_card:
+    weight: 0.07
+    terminal_prob: 0.42
+    payday_sensitive: false
+    raw_reason_text: >-
+      The card's validity period has ended. The stored expiry date is in the
+      past and the instrument can no longer be authorised.
+    base_success:
+      SAME: 0.01
+      UPI: 0.30
+      CREDIT_CARD: 0.04
+      DEBIT_CARD: 0.04
+      NETBANKING: 0.55
+      WALLET: 0.28
+    time_multiplier:
+      NOW: 1.00
+      PLUS_2H: 1.00
+      PLUS_6H: 1.00
+      PLUS_24H: 1.00
+      PLUS_72H: 1.00
+
+  # SHIFT 4: a decline code that did not exist during training.
+  # No one-hot slot, no channel priors, no calibrated friction penalty.
+  # Recoverable, but only by establishing a fresh authorisation on another rail.
+  mandate_revoked:
+    weight: 0.09
+    terminal_prob: 0.30
+    payday_sensitive: false
+    raw_reason_text: >-
+      The standing instruction or e-mandate authorising this recurring debit has
+      been cancelled by the customer at their bank. The debit cannot be
+      represented under the existing mandate.
+    base_success:
+      SAME: 0.02
+      UPI: 0.38
+      CREDIT_CARD: 0.24
+      DEBIT_CARD: 0.20
+      NETBANKING: 0.34
+      WALLET: 0.26
+    time_multiplier:
+      NOW: 0.80
+      PLUS_2H: 0.95
+      PLUS_6H: 1.05
+      PLUS_24H: 1.10
+      PLUS_72H: 1.00
+
+  suspected_fraud:
+    weight: 0.07
+    terminal_prob: 0.94
+    payday_sensitive: false
+    raw_reason_text: >-
+      The issuer's risk engine flagged this authorisation as potentially
+      fraudulent and blocked it. The account may be under a security review.
+    base_success:
+      SAME: 0.01
+      UPI: 0.02
+      CREDIT_CARD: 0.01
+      DEBIT_CARD: 0.01
+      NETBANKING: 0.02
+      WALLET: 0.01
+    time_multiplier:
+      NOW: 1.00
+      PLUS_2H: 1.00
+      PLUS_6H: 1.00
+      PLUS_24H: 1.00
+      PLUS_72H: 1.00
+
+  account_closed:
+    weight: 0.04
+    terminal_prob: 1.00
+    payday_sensitive: false
+    raw_reason_text: >-
+      The account associated with this payment instrument has been closed by
+      the customer or the bank. No further authorisations will be accepted.
+    base_success:
+      SAME: 0.00
+      UPI: 0.00
+      CREDIT_CARD: 0.00
+      DEBIT_CARD: 0.00
+      NETBANKING: 0.00
+      WALLET: 0.00
+    time_multiplier:
+      NOW: 1.00
+      PLUS_2H: 1.00
+      PLUS_6H: 1.00
+      PLUS_24H: 1.00
+      PLUS_72H: 1.00
+
+# SHIFT 3: payday moves to mid-month cycles. The is_likely_payday feature the
+# agent learned is now actively misleading rather than merely uninformative.
+payday:
+  multiplier: 1.30
+  days_of_month: [5, 6, 7, 20, 21, 22]
+
+# Issuers throttle harder here.
+channel_fatigue: [1.00, 0.72, 0.48, 0.30, 0.18]
+
+merchant_tiers:
+  LOW:    {weight: 0.42, success_multiplier: 1.05}
+  MEDIUM: {weight: 0.36, success_multiplier: 0.95}
+  HIGH:   {weight: 0.22, success_multiplier: 0.70}
+
+amount:
+  distribution: lognormal
+  mean_log: 7.3
+  sigma_log: 1.05
+  min: 99.0
+  max: 250000.0
+
+origin_channel_weights:
+  UPI: 0.44
+  CREDIT_CARD: 0.20
+  DEBIT_CARD: 0.18
+  NETBANKING: 0.12
+  WALLET: 0.06
+
+success_probability_cap: 0.92
+
+max_attempts_per_episode: 6
+episode_horizon_hours: 336

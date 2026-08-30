@@ -39,7 +39,13 @@ TASKS: dict[str, list[list[str]]] = {
     "train-bdq": [
         [PY, "-m", "hrapay.train", "--agent", "bdq", "--steps", "60000", "--seeds", "0", "1", "2"]
     ],
-    "eval": [[PY, "-m", "hrapay.eval.cli", "--episodes", "1000", "--eval-seeds", "3"]],
+    "eval": [
+        [PY, "-m", "hrapay.eval.cli", "--episodes", "1000", "--eval-seeds", "3", "--tag", "train"],
+        [PY, "-m", "hrapay.eval.cli", "--spec", "configs/spec_holdout.yaml",
+         "--episodes", "1000", "--eval-seeds", "3", "--tag", "holdout"],
+        [PY, "-m", "hrapay.eval.shift"],
+    ],
+    "shift": [[PY, "-m", "hrapay.eval.shift"]],
     "priors": [[PY, "-m", "hrapay.env.demo", "--episodes", "1", "--refresh-priors"]],
 }
 
