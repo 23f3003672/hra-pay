@@ -6,7 +6,7 @@
   "generated_at": "2026-08-30T06:03:23+00:00",
   "review": {
     "reviewed": true,
-    "reviewed_by": "Pratham Agarwal",
+    "reviewed_by": "Devansh Malhotra",
     "reviewed_at": "2026-08-30",
     "notes": "Reviewed all 8 entries. 5 accepted as scored. 3 overridden -- all for the same root cause: the prompt asked how much friction 'retrying this decline reason' carries, but the reward function applies the returned number to every action taken on that code, including channel switches and delayed retries that specifically defeat the decline reason. The model answered the question it was asked; the question was underspecified. Overrides correct for that. The principled fix is action-conditional friction (see ENGINEERING_LOG, Day 3)."
   },

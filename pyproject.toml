@@ -19,9 +19,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dashboard = ["streamlit>=1.32", "plotly>=5.20"]
+# pytest needs the dashboard extra to smoke-test app/dashboard.py
+dev = ["pytest>=8.0", "ruff>=0.4", "streamlit>=1.32", "plotly>=5.20"]
 llm = ["google-genai>=0.3"]
 razorpay = ["razorpay>=1.4"]
-dev = ["pytest>=8.0", "ruff>=0.4"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

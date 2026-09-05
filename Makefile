@@ -1,4 +1,4 @@
-.PHONY: help install dev test lint fmt env-demo calibrate train eval priors clean
+.PHONY: help install dev test lint fmt env-demo calibrate train eval shift demo priors clean
 
 PY ?= python3
 
@@ -12,7 +12,8 @@ help:
 	@echo "  make env-demo   roll out the environment under a random policy"
 	@echo "  make calibrate  run the offline LLM reward calibration"
 	@echo "  make train      train the flat DQN"
-	@echo "  make eval       evaluate all policies and write results/"
+	@echo "  make eval       evaluate on both distributions + shift report"
+	@echo "  make demo       launch the Streamlit dashboard"
 	@echo "  make priors     recompute the empirical channel-success priors"
 
 install:
@@ -45,6 +46,9 @@ eval:
 	$(PY) -m hrapay.eval.cli --episodes 1000 --eval-seeds 3 --tag train
 	$(PY) -m hrapay.eval.cli --spec configs/spec_holdout.yaml --episodes 1000 --eval-seeds 3 --tag holdout
 	$(PY) -m hrapay.eval.shift
+
+demo:
+	$(PY) -m streamlit run app/dashboard.py
 
 priors:
 	$(PY) -m hrapay.env.demo --episodes 1 --refresh-priors

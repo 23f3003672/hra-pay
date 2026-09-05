@@ -652,3 +652,77 @@ decision into independent heads, which may make it more prone to composing a
 timing choice and a channel choice that were each reasonable in training but are
 jointly wrong once the correlations shift. Recorded as a hypothesis, not a
 conclusion, and it is the first thing I would test with more time.
+
+---
+
+## Day 7 — 30 Aug — the dashboard
+
+**Goal:** make the system's decisions legible to someone who will not read the code.
+
+A results table says the system recovers money. It does not show *why* it did
+what it did, or *what stopped it* — and "explainable, bounded and gated" is a
+claim about exactly those two things. The Episode Explorer is where that claim
+is either demonstrated or exposed as marketing.
+
+### Four views
+
+**Episode Explorer.** One transaction, decision by decision. For each step: what
+the policy proposed and with what Q-values (per-branch for BDQ — the readable
+payoff of the branched design is that the log can show separately what the agent
+thought about *whether* to retry, *when*, and *on which rail*), what the
+PolicyGuard decided and under which named rule, the executor call, and the reward
+decomposed into its terms. Ground-truth fields sit behind a collapsed panel
+labelled ORACLE, so nobody can mistake them for something the agent saw.
+
+Picking the held-out distribution and landing on a `mandate_revoked` episode
+raises a banner explaining that the code was never calibrated, reads as an
+all-zero one-hot, has no channel history, and fell through to the default high
+friction penalty. The deployment failure is a first-class thing the demo can
+show rather than a caveat in prose.
+
+**Results.** Training vs held-out side by side, seed spread visible, and a plain
+list of what survives and what does not — including the two findings that count
+against the project.
+
+**Reward Calibration.** Every entry with the model's justification, and the three
+human overrides shown as an explicit before/after with the reason. The gate is
+visible rather than described.
+
+**Audit Trail.** Raw records, which guard rules fired and how often, and one
+blocked decision expanded in full.
+
+### Colour was computed, not chosen
+
+Two series (training, held-out), so two categorical slots from a validated
+palette. Running the checker on `#2a78d6,#eb6834,#1baf7a,#eda100` returned PASS
+on the lightness band, chroma floor, colour-blind separation (worst adjacent
+ΔE 9.1) and the normal-vision floor (22.9) — with a WARN that two slots fall
+below 3:1 contrast against a light surface, which obliges visible labels or a
+table view. The charts carry direct value labels on every bar *and* print the
+underlying table beneath. Nothing here is identifiable by colour alone.
+
+### Testing a dashboard
+
+An HTTP 200 from the server proves the process started, nothing more — Streamlit
+renders lazily, so every panel could still be throwing. `AppTest` actually
+executes the script and collects exceptions, which is the difference between
+"it boots" and "it works".
+
+`test_dashboard_renders_without_exceptions` is the one that matters: any
+traceback there is a red box on screen during the demo. There is also a check
+that the tabs render *content* rather than every panel quietly bailing to an
+`st.info("run eval first")` placeholder — which would pass a naive smoke test
+while showing an empty dashboard.
+
+The tests skip rather than fail when streamlit is absent, so the core library
+stays testable without the optional extra. The extra is now included in `dev`
+so CI actually exercises the dashboard.
+
+Also fixed on the way through: `use_container_width` is deprecated as of the end
+of 2025 and every table was using it. It still renders with a warning today, but
+"works with a deprecation warning" is a thing that stops working. Switched to
+`width="stretch"`.
+
+### End of day
+
+91 tests. `python tasks.py demo` opens the thing that gets filmed.

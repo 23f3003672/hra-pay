@@ -46,6 +46,7 @@ TASKS: dict[str, list[list[str]]] = {
         [PY, "-m", "hrapay.eval.shift"],
     ],
     "shift": [[PY, "-m", "hrapay.eval.shift"]],
+    "demo": [[PY, "-m", "streamlit", "run", "app/dashboard.py"]],
     "priors": [[PY, "-m", "hrapay.env.demo", "--episodes", "1", "--refresh-priors"]],
 }
 
